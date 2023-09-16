@@ -28,6 +28,11 @@ static struct list ready_list;
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
 
+/*
+  슬립하고 있는 스레드 리스트 (THREAD_BLOCK 상태)
+*/
+static struct list sleep_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -92,6 +97,7 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+  list_init (&sleep_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -248,6 +254,33 @@ thread_unblock (struct thread *t)
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
+}
+
+/* sleep_list가 인터럽트 핸들러에서도 공유중인 자원이므로 인터럽트 off 해야 한다.*/
+void
+thread_sleep (int64_t to_sleep_time) {
+  struct thread *t = thread_current();
+  ASSERT(t != idle_thread);
+  enum intr_level old_level = intr_disable();
+
+  t->sleep_time = to_sleep_time;
+  list_push_back(&sleep_list, &t->elem);
+  thread_block();
+  intr_set_level(old_level);
+}
+
+void
+thread_wakeup () {
+  struct list_elem *sleep_list_elem = list_begin(&sleep_list);
+  while (sleep_list_elem != list_end(&sleep_list)){
+    struct thread *t = list_entry(sleep_list_elem, struct thread, elem);
+    if (t->sleep_time <= timer_ticks()) {
+      sleep_list_elem = list_remove(sleep_list_elem);
+      thread_unblock(t);
+    } else {
+      sleep_list_elem = list_next(sleep_list_elem);
+    }
+  }
 }
 
 /* Returns the name of the running thread. */
@@ -432,7 +465,7 @@ kernel_thread (thread_func *function, void *aux)
   function (aux);       /* Execute the thread function. */
   thread_exit ();       /* If function() returns, kill the thread. */
 }
-
+
 /* Returns the running thread. */
 struct thread *
 running_thread (void) 
