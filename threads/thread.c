@@ -75,6 +75,8 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+static struct thread *thread_max_priority(struct list *);
+static void donation(struct thread *from, struct thread *to);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -253,6 +255,9 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
+  if(t->priority > thread_current()->priority) {
+    thread_yield();
+  }
   intr_set_level (old_level);
 }
 
@@ -266,6 +271,7 @@ thread_sleep (int64_t to_sleep_time) {
   t->sleep_time = to_sleep_time;
   list_push_back(&sleep_list, &t->elem);
   thread_block();
+
   intr_set_level(old_level);
 }
 
@@ -281,6 +287,49 @@ thread_wakeup () {
       sleep_list_elem = list_next(sleep_list_elem);
     }
   }
+}
+
+struct thread *
+thread_pick (struct list *list) {
+  return thread_max_priority(list);
+}
+
+void
+thread_lock_acquire (struct lock *lock) {
+  struct thread *cur = thread_current();
+  if(lock_try_acquire(lock)) {
+    cur->locks++;
+    return;
+  }
+
+  struct thread *holder = lock->holder;
+  if (holder->priority < thread_current()->priority) {
+    donation(thread_current(), holder);
+  }
+  lock_acquire(lock);
+  cur->locks++;
+}
+
+void
+thread_lock_release (struct lock *lock) {
+  struct thread *cur = thread_current();
+
+  struct list_elem *elem= list_begin(&cur->from_donation);
+  while (list_end(&cur->from_donation) == elem) {
+    struct thread *t = list_entry(elem, struct thread, donation_elem);
+    if(t->to_donation == cur) {
+      list_remove(elem);
+      t->to_donation == NULL;
+      break;
+    }
+    elem = list_next(elem);
+  }
+
+  cur->locks--;
+  if(cur->locks == 0) {
+    cur->priority = cur->original_priority;
+  }
+  lock_release(lock);
 }
 
 /* Returns the name of the running thread. */
@@ -303,6 +352,7 @@ thread_current (void)
      have overflowed its stack.  Each thread has less than 4 kB
      of stack, so a few big automatic arrays or moderate
      recursion can cause stack overflow. */
+  
   ASSERT (is_thread (t));
   ASSERT (t->status == THREAD_RUNNING);
 
@@ -348,7 +398,7 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
+  if (cur != idle_thread)
     list_push_back (&ready_list, &cur->elem);
   cur->status = THREAD_READY;
   schedule ();
@@ -501,6 +551,8 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->original_priority = priority;
+  t->to_donation = NULL;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
 }
@@ -528,8 +580,44 @@ next_thread_to_run (void)
 {
   if (list_empty (&ready_list))
     return idle_thread;
-  else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  else {
+    return thread_max_priority(&ready_list);
+  }
+}
+
+/*
+  [우선순위 스레드 스케쥴링]
+  시간 복잡도 O(n)으로 구현 되어 있다. priority 재계산 빈도를 고려하면 우선순위 큐를 이용하는게 더 효율적일수 있다. */
+static struct thread *
+thread_max_priority (struct list *list) {
+  printf("max priority start!!!!\n");
+  // 코드가 매우 장황하다. stream이 필요할때다.
+  struct list_elem *list_elem = list_begin(list);
+  struct thread *max_priority_thread = list_entry(list_elem, struct thread, elem);
+  while (list_end(&ready_list) == list_elem)
+  {
+    list_elem = list_next(list_elem);
+    struct thread *t = list_entry(list_elem, struct thread, elem);
+    if (max_priority_thread->priority < t->priority)
+    {
+      max_priority_thread = t;
+    }
+  }
+  printf("max priority end!!!!\n");
+
+  return max_priority_thread;
+}
+
+static void
+donation (struct thread *from, struct thread *to) {
+  if(to == NULL) {
+    return;
+  }
+  to->priority = from->priority;
+  from->to_donation = to;
+  list_push_back(&to->from_donation, &from->donation_elem);
+  // nested donation
+  donation(to, to->to_donation);
 }
 
 /* Completes a thread switch by activating the new thread's page
