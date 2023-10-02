@@ -590,7 +590,6 @@ next_thread_to_run (void)
   시간 복잡도 O(n)으로 구현 되어 있다. priority 재계산 빈도를 고려하면 우선순위 큐를 이용하는게 더 효율적일수 있다. */
 static struct thread *
 thread_max_priority (struct list *list) {
-  printf("max priority start!!!!\n");
   // 코드가 매우 장황하다. stream이 필요할때다.
   struct list_elem *list_elem = list_begin(list);
   struct thread *max_priority_thread = list_entry(list_elem, struct thread, elem);
@@ -603,7 +602,6 @@ thread_max_priority (struct list *list) {
       max_priority_thread = t;
     }
   }
-  printf("max priority end!!!!\n");
 
   return max_priority_thread;
 }
