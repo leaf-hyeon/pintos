@@ -113,10 +113,12 @@ sema_up (struct semaphore *sema)
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
+  // thread_unblock 하기 전에 먼 세마포어 값을 올려야 한다.
+  // thread_unblock에서 스케쥴링이 일어날수 있기 때문
+  sema->value++;
   if (!list_empty (&sema->waiters)) {
     thread_unblock(thread_pick(&sema->waiters));
   }
-  sema->value++;
   intr_set_level (old_level);
 }
 

@@ -167,6 +167,8 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
+  ASSERT(intr_context());
+
   ticks++;
   thread_tick ();
   thread_wakeup();

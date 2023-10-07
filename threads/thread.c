@@ -130,6 +130,8 @@ thread_start (void)
 void
 thread_tick (void) 
 {
+  ASSERT(intr_context());
+
   struct thread *t = thread_current ();
 
   /* Update statistics. */
@@ -255,9 +257,6 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
-  if(t->priority > thread_current()->priority) {
-    thread_yield();
-  }
   intr_set_level (old_level);
 }
 
@@ -275,8 +274,15 @@ thread_sleep (int64_t to_sleep_time) {
   intr_set_level(old_level);
 }
 
+/** 타이머 인터럽트시에 호출되는 함수이므로 외부 인터럽트 컨텍스트에 속한다. */
 void
 thread_wakeup () {
+  ASSERT(intr_context());
+
+  if(list_empty(&sleep_list)) {
+    return;
+  }
+
   struct list_elem *sleep_list_elem = list_begin(&sleep_list);
   while (sleep_list_elem != list_end(&sleep_list)){
     struct thread *t = list_entry(sleep_list_elem, struct thread, elem);
@@ -287,11 +293,20 @@ thread_wakeup () {
       sleep_list_elem = list_next(sleep_list_elem);
     }
   }
+
+  if(thread_max_priority(&ready_list)->priority < thread_current()->priority) {
+    intr_yield_on_return();
+  }
 }
 
 struct thread *
 thread_pick (struct list *list) {
-  return thread_max_priority(list);
+return thread_max_priority(list);
+}
+
+struct thread *
+thread_pick_ready_thread () {
+  return thread_max_priority(&ready_list);
 }
 
 void
@@ -591,19 +606,23 @@ next_thread_to_run (void)
   시간 복잡도 O(n)으로 구현 되어 있다. priority 재계산 빈도를 고려하면 우선순위 큐를 이용하는게 더 효율적일수 있다. */
 static struct thread *
 thread_max_priority (struct list *list) {
+  if(list_empty(list)) {
+    return NULL;
+  }
+
   // 코드가 매우 장황하다. stream이 필요할때다.
   struct list_elem *list_elem = list_begin(list);
   struct thread *max_priority_thread = list_entry(list_elem, struct thread, elem);
-  while (list_end(&ready_list) == list_elem)
+  while (list_end(list) != list_elem)
   {
-    list_elem = list_next(list_elem);
     struct thread *t = list_entry(list_elem, struct thread, elem);
     if (max_priority_thread->priority < t->priority)
     {
       max_priority_thread = t;
     }
+    list_elem = list_next(list_elem);
   }
-
+  list_remove(&max_priority_thread->elem);
   return max_priority_thread;
 }
 
