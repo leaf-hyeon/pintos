@@ -75,7 +75,7 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
-static struct thread *thread_max_priority(struct list *);
+static struct thread *thread_max_priority_or_null(struct list *);
 static void donation(struct thread *from, struct thread *to);
 
 /* Initializes the threading system by transforming the code
@@ -294,19 +294,22 @@ thread_wakeup () {
     }
   }
 
-  if(thread_max_priority(&ready_list)->priority < thread_current()->priority) {
+  struct thread *max_t = thread_max_priority_or_null(&ready_list);
+  if (max_t != NULL && (max_t->priority < thread_current()->priority )) {
     intr_yield_on_return();
   }
+
 }
 
+/* if list is empty, return null */
 struct thread *
 thread_pick (struct list *list) {
-return thread_max_priority(list);
-}
-
-struct thread *
-thread_pick_ready_thread () {
-  return thread_max_priority(&ready_list);
+  struct thread *t = thread_max_priority_or_null(list);
+  if(t==NULL) {
+    return NULL;
+  }
+  list_remove(&t->elem);
+  return t;
 }
 
 void
@@ -330,7 +333,7 @@ thread_lock_release (struct lock *lock) {
   struct thread *cur = thread_current();
 
   struct list_elem *elem= list_begin(&cur->from_donation);
-  while (list_end(&cur->from_donation) == elem) {
+  while (list_end(&cur->from_donation) != elem) {
     struct thread *t = list_entry(elem, struct thread, donation_elem);
     if(t->to_donation == cur) {
       list_remove(elem);
@@ -597,15 +600,20 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else {
-    return thread_max_priority(&ready_list);
+    struct thread *t = thread_max_priority_or_null(&ready_list);
+    list_remove(&t->elem);
+    return t;
   }
 }
 
 /*
+  peek list. 
+  If you wanna pick the thread, use list_remove() with this result.
+  If list is empty, return null.
   [우선순위 스레드 스케쥴링]
   시간 복잡도 O(n)으로 구현 되어 있다. priority 재계산 빈도를 고려하면 우선순위 큐를 이용하는게 더 효율적일수 있다. */
 static struct thread *
-thread_max_priority (struct list *list) {
+thread_max_priority_or_null (struct list *list) {
   if(list_empty(list)) {
     return NULL;
   }
@@ -622,7 +630,6 @@ thread_max_priority (struct list *list) {
     }
     list_elem = list_next(list_elem);
   }
-  list_remove(&max_priority_thread->elem);
   return max_priority_thread;
 }
 

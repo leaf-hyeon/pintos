@@ -130,7 +130,6 @@ void thread_unblock (struct thread *);
 void thread_sleep (int64_t to_sleep_time);
 void thread_wakeup (void);
 struct thread *thread_pick (struct list *);
-struct thread *thread_pick_ready_thread (); 
 struct lock;
 void thread_lock_acquire (struct lock *lock);
 void thread_lock_release (struct lock *lock);
