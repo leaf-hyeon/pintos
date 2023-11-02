@@ -75,8 +75,7 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
-static struct thread *thread_max_priority_or_null(struct list *);
-static void donation(struct thread *from, struct thread *to);
+static bool thread_is_donated (void);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -218,6 +217,7 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
+  thread_try_preemtion();
 
   return tid;
 }
@@ -294,67 +294,30 @@ thread_wakeup () {
     }
   }
 
-  struct thread *max_t = thread_max_priority_or_null(&ready_list);
+  struct thread *max_t = thread_peek_max_priority_or_null(&ready_list);
   if (max_t != NULL && (max_t->priority < thread_current()->priority )) {
     intr_yield_on_return();
   }
 
 }
 
-/* if list is empty, return null */
-struct thread *
-thread_pick (struct list *list) {
-  struct thread *t = thread_max_priority_or_null(list);
-  if(t==NULL) {
-    return NULL;
-  }
-  list_remove(&t->elem);
-  return t;
-}
-
 void
-thread_lock_acquire (struct lock *lock) {
-  struct thread *cur = thread_current();
-  if(lock_try_acquire(lock)) {
-    cur->locks++;
+thread_try_preemtion () {
+  struct thread *t = thread_peek_max_priority_or_null(&ready_list);
+  if(t == NULL) {
     return;
   }
 
-  struct thread *holder = lock->holder;
-  if (holder->priority < thread_current()->priority) {
-    donation(thread_current(), holder);
+  if(thread_current()->priority < t->priority) {
+    thread_yield();
   }
-  lock_acquire(lock);
-  cur->locks++;
-}
-
-void
-thread_lock_release (struct lock *lock) {
-  struct thread *cur = thread_current();
-
-  struct list_elem *elem= list_begin(&cur->from_donation);
-  while (list_end(&cur->from_donation) != elem) {
-    struct thread *t = list_entry(elem, struct thread, donation_elem);
-    if(t->to_donation == cur) {
-      list_remove(elem);
-      t->to_donation == NULL;
-      break;
-    }
-    elem = list_next(elem);
-  }
-
-  cur->locks--;
-  if(cur->locks == 0) {
-    cur->priority = cur->original_priority;
-  }
-  lock_release(lock);
 }
 
 /* Returns the name of the running thread. */
 const char *
 thread_name (void) 
 {
-  return thread_current ()->name;
+return thread_current ()->name;
 }
 
 /* Returns the running thread.
@@ -444,7 +407,23 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  struct thread *cur = thread_current();
+  // 도네이션 받은 우선순위와 비교해야함.
+  if (thread_is_donated()) {
+    if (cur->priority < new_priority) {
+      cur->priority = new_priority;
+    }
+  } else {
+    cur->priority = new_priority;
+  }
+  cur->original_priority = new_priority;
+  thread_try_preemtion();
+}
+
+static bool
+thread_is_donated () {
+  struct thread *cur = thread_current();
+  return cur->original_priority != cur->priority;
 }
 
 /* Returns the current thread's priority. */
@@ -570,7 +549,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->original_priority = priority;
-  list_init(&t->from_donation);
+  list_init(&t->max_donation_per_lock);
   t->to_donation = NULL;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
@@ -600,20 +579,31 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else {
-    struct thread *t = thread_max_priority_or_null(&ready_list);
-    list_remove(&t->elem);
-    return t;
+    return thread_max_priority_or_null(&ready_list);
   }
+}
+
+/* If list is empty, return null */
+struct thread *
+thread_max_priority_or_null (struct list *list) {
+  struct thread *t = thread_peek_max_priority_or_null(list);
+  if(t != NULL) {
+    list_remove(&t->elem);
+  }
+
+  return t;
 }
 
 /*
   peek list. 
-  If you wanna pick the thread, use list_remove() with this result.
+  If you wanna pick the thread, use thread_max_priority_or_null(struct list *)
   If list is empty, return null.
-  [우선순위 스레드 스케쥴링]
-  시간 복잡도 O(n)으로 구현 되어 있다. priority 재계산 빈도를 고려하면 우선순위 큐를 이용하는게 더 효율적일수 있다. */
-static struct thread *
-thread_max_priority_or_null (struct list *list) {
+   */
+struct thread *
+thread_peek_max_priority_or_null (struct list *list) {
+  /*[우선순위 스레드 스케쥴링]
+   시간 복잡도 O(n)으로 구현 되어 있다. priority 재계산 빈도를 고려하면 우선순위 큐를 이용하는게 더 효율적일수 있다.
+   */
   if(list_empty(list)) {
     return NULL;
   }
@@ -633,16 +623,34 @@ thread_max_priority_or_null (struct list *list) {
   return max_priority_thread;
 }
 
-static void
-donation (struct thread *from, struct thread *to) {
+void
+thread_donation (struct thread *from, struct thread *to) {
   if(to == NULL) {
     return;
   }
-  to->priority = from->priority;
   from->to_donation = to;
-  list_push_back(&to->from_donation, &from->donation_elem);
+  to->priority = from->priority;
   // nested donation
-  donation(to, to->to_donation);
+  thread_donation(to, to->to_donation);
+}
+
+void
+thread_remove_donations (struct list *wait_list) {
+  struct list_elem *list_elem = list_begin(wait_list);
+  while (list_end(wait_list) != list_elem)
+  {
+    struct thread *t = list_entry(list_elem, struct thread, elem);
+    t->to_donation = NULL;
+    list_elem = list_next(list_elem);
+  }
+}
+
+bool 
+thread_less_than_priority (struct list_elem *a, struct list_elem *b, void *aux UNUSED)
+{
+  struct thread *t_a = list_entry(a, struct thread, elem);
+  struct thread *t_b = list_entry(b, struct thread, elem);
+  return t_a->priority < t_b->priority ? true : false;
 }
 
 /* Completes a thread switch by activating the new thread's page

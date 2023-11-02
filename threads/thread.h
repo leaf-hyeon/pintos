@@ -89,17 +89,16 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     int original_priority;              /* original priority. */
-    struct list from_donation;
-    struct list_elem donation_elem;
-    struct thread *to_donation;                     
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+    struct list_elem donation_elem;
+    /* */
+    struct list max_donation_per_lock;
+    struct thread *to_donation;              
     /* thread sleep time */
     int64_t sleep_time;
-    /* the number of lock it has */
-    int locks;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -129,10 +128,12 @@ void thread_unblock (struct thread *);
 
 void thread_sleep (int64_t to_sleep_time);
 void thread_wakeup (void);
-struct thread *thread_pick (struct list *);
-struct lock;
-void thread_lock_acquire (struct lock *lock);
-void thread_lock_release (struct lock *lock);
+void thread_try_preemtion();
+struct thread *thread_max_priority_or_null(struct list *);
+struct thread *thread_peek_max_priority_or_null(struct list *);
+void thread_donation(struct thread *from, struct thread *to);
+void thread_remove_donations (struct list *wait_list);
+bool thread_less_than_priority (struct list_elem *a, struct list_elem *b, void *aux UNUSED);
 
 struct thread *thread_current (void);
 tid_t thread_tid (void);
