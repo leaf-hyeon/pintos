@@ -49,6 +49,7 @@
         "ratio": "c",
         "chrono": "c",
         "synch.h": "c",
-        "__stddef_max_align_t.h": "c"
+        "__stddef_max_align_t.h": "c",
+        "fixed_point.h": "c"
     }
 }

@@ -99,6 +99,8 @@ struct thread
     struct thread *to_donation;              
     /* thread sleep time */
     int64_t sleep_time;
+    int nice;
+    int recent_cpu;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -153,5 +155,9 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+void recalcualte_load_avg(void);
+void thread_recalcualte_recent_cpu(void);
+void thread_all_recalculate_priority(void);
+void thread_recalculate_priority(struct thread *t);
 
 #endif /* threads/thread.h */

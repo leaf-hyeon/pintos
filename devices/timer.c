@@ -170,14 +170,25 @@ timer_interrupt (struct intr_frame *args UNUSED)
   ASSERT(intr_context());
 
   ticks++;
-  thread_tick ();
+  thread_tick();
   thread_wakeup();
+  if(thread_mlfqs) {
+    thread_increment_recent_cpu();
+    if (ticks % TIMER_FREQ == 0)
+    {
+      recalcualte_load_avg();
+      thread_recalcualte_recent_cpu();
+    }
+    if (ticks % 4 == 0)
+    {
+      thread_all_recalculate_priority();
+    }
+  }
 }
 
-/* Returns true if LOOPS iterations waits for more than one timer
-   tick, otherwise false. */
-static bool
-too_many_loops (unsigned loops) 
+    /* Returns true if LOOPS iterations waits for more than one timer
+       tick, otherwise false. */
+    static bool too_many_loops(unsigned loops)
 {
   /* Wait for a timer tick. */
   int64_t start = ticks;

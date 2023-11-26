@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/fixed_point.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -63,6 +64,7 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
+int load_avg = 0;
 
 static void kernel_thread (thread_func *, void *aux);
 
@@ -407,6 +409,10 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  if(thread_mlfqs) {
+    return;
+  }
+
   struct thread *cur = thread_current();
   // 도네이션 받은 우선순위와 비교해야함.
   if (thread_is_donated()) {
@@ -437,31 +443,83 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+  // nice value를 새롭게 업데이트하고 우선순위를 재계산한다.
+  struct thread *cur = thread_current();
+  cur->nice = nice;
+  thread_recalculate_priority(cur);
+  thread_try_preemtion();
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  enum intr_level old_level;
+
+  old_level = intr_disable();
+  int new_load_avg = fp_to_int_round(mult_mixed(load_avg, 100));
+  intr_set_level(old_level);
+
+  return new_load_avg;
+}
+
+void
+thread_all_recalculate_priority() {
+  struct thread *loop_thread = list_begin(&all_list);
+  while (loop_thread != list_end(loop_thread))
+  {
+    thread_recalculate_priority(loop_thread);
+    loop_thread = list_next(loop_thread);
+  }
+}
+void
+thread_recalculate_priority(struct thread *t) {
+  if (t == idle_thread)
+  {
+    return;
+  }
+  t->priority = fp_to_int_round(sub_mixed(sub_fp(int_to_fp(PRI_MAX), div_mixed(t->recent_cpu, 4)), t->nice * 2));
+}
+
+void
+thread_increment_recent_cpu() {
+  struct thread *cur = thread_current();
+  if(cur != idle_thread) {
+    cur->recent_cpu = add_mixed(cur->recent_cpu, 1);
+  }
+}
+
+void
+thread_recalcualte_recent_cpu() {
+  struct thread *loop_thread = list_begin(&all_list);
+  while(loop_thread != list_end(loop_thread)) {
+    if(loop_thread == idle_thread) {
+      continue;
+    }
+    loop_thread->recent_cpu = add_mixed(mult_fp(div_fp(mult_mixed(load_avg, 2), add_mixed(mult_mixed(load_avg, 2), 1)), loop_thread->recent_cpu), loop_thread->nice);
+    loop_thread = list_next(loop_thread);
+  }
+}
+
+void
+recalcualte_load_avg()
+{
+  int the_number_of_ready_threads = list_size(&ready_list) + (thread_current() == idle_thread ? 0 : 1);
+  load_avg = add_fp(mult_fp(div_fp(int_to_fp(59), int_to_fp(60)), load_avg),  mult_mixed(div_fp(int_to_fp(1), int_to_fp(60)), the_number_of_ready_threads));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return fp_to_int_round(mult_mixed(thread_current()->recent_cpu, 100));
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.

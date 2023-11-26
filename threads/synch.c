@@ -203,7 +203,7 @@ lock_acquire (struct lock *lock)
 
   struct thread *cur = thread_current();
   struct thread *holder = lock->holder;
-  if (holder != NULL) {
+  if (holder != NULL && !thread_mlfqs) {
     if (holder->priority < cur->priority) {
       thread_donation(cur, holder);
     }
@@ -256,7 +256,7 @@ lock_release (struct lock *lock)
 
   lock->holder = NULL;
   struct thread *cur = thread_current();
-  if (!list_empty(&(lock->semaphore.waiters))) {
+  if (!list_empty(&(lock->semaphore.waiters) && !thread_mlfqs)) {
     thread_remove_donations(&(lock->semaphore.waiters));
     struct list_elem *elem = list_max(&(lock->semaphore.waiters), thread_less_than_priority, NULL);
     struct thread *t = list_entry(elem, struct thread, elem);
