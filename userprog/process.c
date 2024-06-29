@@ -20,13 +20,14 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static void setup_argument_on_stack (char *args[], int length, void **esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
-process_execute (const char *file_name) 
+process_execute (const char *task) 
 {
   char *fn_copy;
   tid_t tid;
@@ -36,10 +37,10 @@ process_execute (const char *file_name)
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  strlcpy (fn_copy, task, PGSIZE);
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (task, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -48,21 +49,31 @@ process_execute (const char *file_name)
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *file_name_)
+start_process (void *task_)
 {
-  char *file_name = file_name_;
+  char *task = task_;
   struct intr_frame if_;
   bool success;
+
+  char *save_ptr;
+  char *args[128];
+  int args_size = 0;
+  for (char *token = strtok_r(task, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
+  {
+    args[args_size++] = token;
+  }
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (args[0], &if_.eip, &if_.esp);
+
+  setup_argument_on_stack(args, args_size, &if_.esp);
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
+  palloc_free_page (task);
   if (!success) 
     thread_exit ();
 
@@ -214,9 +225,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
-
   /* Allocate and activate page directory. */
-  t->pagedir = pagedir_create ();
+  t->pagedir = pagedir_create();
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
@@ -442,6 +452,56 @@ setup_stack (void **esp)
         palloc_free_page (kpage);
     }
   return success;
+}
+
+// 컴파일러의 word alignment와 충돌이 생기지 않을까?
+static void
+setup_argument_on_stack (char *args[], int length, void **esp) {
+  void *before_esp = *esp;
+  char *args_stack_ptr[length];
+  for(int i=length-1 ; i>=0 ; i--) {
+    for(int j=0 ; i<strlen(args[i]) ; j++) {
+      *(char **)esp--; // decrease stack pointer
+      **(char **)esp = args[i][j]; // call by value
+    }
+    args_stack_ptr[i] = *esp;
+  }
+
+  printf("---args stack phase 1 (args)---\n");
+  hex_dump(0,*esp,(uint8_t *)before_esp - *(uint8_t **)esp,true);
+
+  before_esp = *esp;
+  int word_align_padding = (int)*esp % 4;
+  for(int i=0 ; i<word_align_padding ; i++) {
+    *(uint8_t **)esp--; // esp 1byte down
+    **(uint8_t **)esp = 0; // add padding
+  }
+
+  printf("---args stack phase 2 (padding)---\n");
+  hex_dump(0, *esp,(uint8_t *)before_esp - *(uint8_t **)esp, true);
+
+  before_esp = *esp;
+  for(int i=length-1 ; i>=0 ; i--) {
+    *(char ***)esp--;
+    **(char ***)esp = args_stack_ptr[i]; // argv pointer
+  }
+
+  printf("---args stack phase 3 (args pointer)---\n");
+  hex_dump(0, *esp, (uint8_t *)before_esp - *(uint8_t **)esp, true);
+
+  before_esp = *esp;
+  *(int **)esp--;
+  esp = length; // argc
+
+  printf("---args stack phase 4 (argc)---\n");
+  hex_dump(0, *esp, (uint8_t *)before_esp - *(uint8_t **)esp, true);
+
+  before_esp = *esp;
+  *(void ***)esp--;
+  **(void ***)esp = 0; // return address 0
+
+  printf("---args stack phase 5 (return address)---\n");
+  hex_dump(0, *esp,(uint8_t *)before_esp - *(uint8_t **)esp, true);
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel

@@ -256,7 +256,7 @@ lock_release (struct lock *lock)
 
   lock->holder = NULL;
   struct thread *cur = thread_current();
-  if (!list_empty(&(lock->semaphore.waiters) && !thread_mlfqs)) {
+  if (!list_empty(&(lock->semaphore.waiters)) && !thread_mlfqs) {
     thread_remove_donations(&(lock->semaphore.waiters));
     struct list_elem *elem = list_max(&(lock->semaphore.waiters), thread_less_than_priority, NULL);
     struct thread *t = list_entry(elem, struct thread, elem);

@@ -472,11 +472,11 @@ thread_get_load_avg (void)
 
 void
 thread_all_recalculate_priority() {
-  struct thread *loop_thread = list_begin(&all_list);
-  while (loop_thread != list_end(loop_thread))
+  struct list_elem *loop_list = list_begin(&all_list);
+  while (loop_list != list_end(&all_list))
   {
-    thread_recalculate_priority(loop_thread);
-    loop_thread = list_next(loop_thread);
+    thread_recalculate_priority(list_entry(loop_list, struct thread, allelem));
+    loop_list = list_next(loop_list);
   }
 }
 void
@@ -498,13 +498,14 @@ thread_increment_recent_cpu() {
 
 void
 thread_recalcualte_recent_cpu() {
-  struct thread *loop_thread = list_begin(&all_list);
-  while(loop_thread != list_end(loop_thread)) {
+  struct list_elem *loop_list = list_begin(&all_list);
+  while(loop_list != list_end(&all_list)) {
+    struct thread *loop_thread = list_entry(loop_list,struct thread, allelem);
     if(loop_thread == idle_thread) {
       continue;
     }
     loop_thread->recent_cpu = add_mixed(mult_fp(div_fp(mult_mixed(load_avg, 2), add_mixed(mult_mixed(load_avg, 2), 1)), loop_thread->recent_cpu), loop_thread->nice);
-    loop_thread = list_next(loop_thread);
+    loop_list = list_next(loop_list);
   }
 }
 
