@@ -1,0 +1,14 @@
+{
+    "files.associations": {
+        "thread.h": "c",
+        "stdio.h": "c",
+        "inttypes.h": "c",
+        "round.h": "c",
+        "__config": "c",
+        "syscall.h": "c",
+        "cstdio": "c",
+        "cstdlib": "c"
+    },
+    "C_Cpp.intelliSenseEngine": "Default",
+    "C_Cpp.loggingLevel": "Information"
+}

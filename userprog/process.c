@@ -17,6 +17,8 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "lib/stdio.h"
+#include "devices/timer.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -26,7 +28,7 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
-process_execute (const char *file_name) 
+process_execute (const char *task) 
 {
   char *fn_copy;
   tid_t tid;
@@ -36,7 +38,10 @@ process_execute (const char *file_name)
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  strlcpy (fn_copy, task, PGSIZE);
+
+  char *save_ptr;
+  char *file_name = strtok_r(task, " ", &save_ptr);
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
@@ -48,9 +53,8 @@ process_execute (const char *file_name)
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *file_name_)
+start_process (void *task)
 {
-  char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
 
@@ -59,10 +63,10 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (task, &if_.eip, &if_.esp);
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
+  palloc_free_page (task);
   if (!success) 
     thread_exit ();
 
@@ -88,6 +92,9 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  printf("process_wait\n");
+  timer_msleep(2000);
+  printf("process wait end!!!!\n");
   return -1;
 }
 
@@ -195,7 +202,10 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (void **esp, char *task);
+static char* copy_task(char *task);
+static int get_arg_count(char *task);
+static char** get_arg(char *task);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -206,7 +216,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (const char *file_name, void (**eip) (void), void **esp) 
+load (const char *task, void (**eip) (void), void **esp) 
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -222,6 +232,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
+  char *save_ptr;
+  char *file_name = strtok_r(copy_task(task), " ", &save_ptr);
   file = filesys_open (file_name);
   if (file == NULL) 
     {
@@ -302,7 +314,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp, task))
     goto done;
 
   /* Start address. */
@@ -315,7 +327,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
   file_close (file);
   return success;
 }
-
+
+static char*
+copy_task(char *task) {
+  char *task_cp = malloc(strlen(task) + 1);
+  strlcpy(task_cp, task, strlen(task) + 1);
+
+  return task_cp;
+}
 /* load() helpers. */
 
 static bool install_page (void *upage, void *kpage, bool writable);
@@ -425,9 +444,11 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 }
 
 /* Create a minimal stack by mapping a zeroed page at the top of
-   user virtual memory. */
+   user virtual memory. 
+   set up for user_stack
+   */
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp, char *task) 
 {
   uint8_t *kpage;
   bool success = false;
@@ -441,7 +462,87 @@ setup_stack (void **esp)
       else
         palloc_free_page (kpage);
     }
+
+  int argc = get_arg_count(task);
+  char **task_array = get_arg(task);
+
+  // task 인자들 유저 스택에 push 및 주소 저장
+  char *task_array_ptr[argc];
+  for(int i= argc-1 ; i>=0 ; i--) {
+    *esp = (char *)(*esp) - strlen(task_array[i]) -1; 
+    task_array_ptr[i] = *esp; // 인자 스택 주소
+    strlcpy(*esp, task_array[i], strlen(task_array[i]) + 1);
+  }
+  uint8_t *dump_ptr = *esp;
+  // word_alignment
+  int task_total_byte = 0;
+  for(int i=0 ; i<argc ; i++) {
+    task_total_byte += strlen(task_array[i]) + 1;
+  }
+  int word_alignment_byte = 4 - (task_total_byte % 4);
+  if(word_alignment_byte != 4) {
+    for(int i=0 ; i<word_alignment_byte ; i++) {
+      (uint8_t *)(*esp)--;
+    }
+  }
+  // 인수의 마지막을 나타내는 NULL 포인터
+  *esp-=4;
+  *((char **)(*esp)) = NULL;
+  // task 인자 포인터 push
+  for(int i=argc-1 ; i>=0 ; i--) {
+    *esp-=4;
+    *((char **)(*esp)) = task_array_ptr[i];
+  }
+  // 첫 인자 포인터를 가르키는 포인터
+  *esp-=4;
+  *((char ***)(*esp)) = *esp + 4;
+  // 인자 개수 push
+  *esp-=4;
+  *(int *)(*esp) = argc;
+  // dummy return address push
+  typedef void (* return_address)();
+  typedef return_address *return_address_ptr;
+  *esp-=4;
+  *(return_address_ptr)(*esp) = NULL;
+  hex_dump(*esp, *esp, 100, true);
   return success;
+}
+
+static int
+get_arg_count(char *task) {
+  char *task_cp = copy_task(task);
+
+  char *save_ptr;
+  char *first_arg = strtok_r(task_cp, " ", &save_ptr);
+  if(first_arg == NULL) {
+    return 0;
+  }
+
+  int argc = 1;
+  while(strtok_r(NULL, " ", &save_ptr)) {
+    argc++;
+  }
+
+  return argc;
+}
+
+static char **
+get_arg(char *task) {
+  // task 인자들 배열로 뽑아내기
+  int argc = get_arg_count(task);
+  char *task_cp = copy_task(task);
+
+  char *save_ptr;
+  char **task_array = malloc(sizeof(char *)*argc);
+  for(int i=0 ; i<argc ; i++) {
+    if(i == 0) {
+      task_array[i] = strtok_r(task_cp, " ", &save_ptr);
+    } else {
+      task_array[i] = strtok_r(NULL, " ", &save_ptr);
+    }
+  }
+
+  return task_array;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
