@@ -97,6 +97,7 @@ main (void)
   /* Initialize memory system. */
   palloc_init (user_page_limit);
   malloc_init ();
+  thread_event_init(thread_current());
   paging_init ();
 
   /* Segmentation. */
@@ -134,7 +135,7 @@ main (void)
 
   /* Finish up. */
   shutdown ();
-  thread_exit ();
+  thread_exit (0);
 }
 
 /* Clear the "BSS", a segment that should be initialized to

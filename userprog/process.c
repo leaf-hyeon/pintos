@@ -19,16 +19,21 @@
 #include "threads/vaddr.h"
 #include "lib/stdio.h"
 #include "devices/timer.h"
+#include "devices/input.h"
+#include "lib/kernel/stdio.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static void process_fdt_close(struct file **fdt);
+static void free_exit_children_event(struct list *children_evenets);
+static char* copy_task(char *task);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
-process_execute (const char *task) 
+process_execute (const char *task)
 {
   char *fn_copy;
   tid_t tid;
@@ -41,12 +46,19 @@ process_execute (const char *task)
   strlcpy (fn_copy, task, PGSIZE);
 
   char *save_ptr;
-  char *file_name = strtok_r(task, " ", &save_ptr);
+  char *file_name = strtok_r(copy_task(task), " ", &save_ptr);
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    palloc_free_page (fn_copy);
+
+  struct thread_event *event = thread_get_child_event_or_null(tid);
+  sema_down(&(event->start_wait));
+  if(!event->start_success) {
+    return -1;
+  }
+
   return tid;
 }
 
@@ -65,10 +77,15 @@ start_process (void *task)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (task, &if_.eip, &if_.esp);
 
+  struct thread_event *event = thread_current()->event;
+  event->start_success = success;
+  sema_up(&(event->start_wait));
+
   /* If load failed, quit. */
   palloc_free_page (task);
-  if (!success) 
-    thread_exit ();
+  if (!success) {
+    thread_exit (-1);
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -90,17 +107,24 @@ start_process (void *task)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  printf("process_wait\n");
-  timer_msleep(2000);
-  printf("process wait end!!!!\n");
-  return -1;
+  struct thread_event *child_thread_event = thread_get_child_event_or_null(child_tid);
+  if(child_thread_event == NULL) {
+    return -1;
+  }
+
+  sema_down(&(child_thread_event->exit_wait));
+  int exit_status = child_thread_event->exit_status;
+  list_remove(&(child_thread_event->event_elem));
+  free(child_thread_event);
+
+  return exit_status;
 }
 
 /* Free the current process's resources. */
 void
-process_exit (void)
+process_exit (int status)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
@@ -121,6 +145,33 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  cur->event->exit_status = status;
+  process_fdt_close(cur->fdt);
+  file_close(cur->excute_file);
+  sema_up(&(cur->event->exit_wait));
+  free_exit_children_event(&(cur->children_events));
+}
+
+static void
+process_fdt_close(struct file **fdt) {
+  for(int i=0 ; i<FDT_SIZE ; i++) {
+    if(fdt[i] != NULL) {
+      file_close(fdt[i]);
+    }
+  }
+}
+
+static void
+free_exit_children_event(struct list *children_evenets) {
+  struct list_elem *event_elem = list_begin(children_evenets);
+  while(list_end(children_evenets) != event_elem) {
+    struct thread_event *event = list_entry(event_elem, struct thread_event, event_elem);
+    if(event->is_exited) {
+      free(event);
+    }
+    event_elem = list_next(event_elem);
+  }
 }
 
 /* Sets up the CPU for running user code in the current
@@ -203,7 +254,6 @@ struct Elf32_Phdr
 #define PF_R 4          /* Readable. */
 
 static bool setup_stack (void **esp, char *task);
-static char* copy_task(char *task);
 static int get_arg_count(char *task);
 static char** get_arg(char *task);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
@@ -319,12 +369,12 @@ load (const char *task, void (**eip) (void), void **esp)
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
-
   success = true;
+  file_deny_write(file);
+  t->excute_file = file;
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
   return success;
 }
 
@@ -504,7 +554,7 @@ setup_stack (void **esp, char *task)
   typedef return_address *return_address_ptr;
   *esp-=4;
   *(return_address_ptr)(*esp) = NULL;
-  hex_dump(*esp, *esp, 100, true);
+  // hex_dump(*esp, *esp, 100, true);
   return success;
 }
 
@@ -564,3 +614,99 @@ install_page (void *upage, void *kpage, bool writable)
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
+
+unsigned int
+process_file_open (char *file_name) {
+  struct file *file = filesys_open(file_name);
+  if(file == NULL) {
+    return -1;
+  }
+
+  struct thread *cur = thread_current();
+  struct file **fdt = cur->fdt;
+  unsigned int fd = -1;
+  for(int i = NOT_PRESERVED_FD ; i< FDT_SIZE ; i++) {
+    if(fdt[i] == NULL) {
+      fdt[i] = file;
+      fd = i;
+      break;
+    }
+  }
+
+  return fd;
+}
+
+/* 읽은 바이트 수를 반환한다. 읽지 못했을때 -1을 반환한다.
+*/
+int
+process_file_read(int fd, void *buffer, unsigned size) {
+  if(fd == 0) {
+    uint8_t *cast_buffer = buffer;
+    // size만큼 buffer로 읽어들여야 함
+    for(int i=0 ; i<size ; i++) {
+      cast_buffer[i] = input_getc();
+    }
+
+    return size;
+  }
+  struct file **fdt = thread_current()->fdt;
+  if(fdt[fd] == NULL) {
+    return -1;
+  }
+  
+  return file_read(fdt[fd], buffer, size);
+}
+
+/* 쓴 바이트 수를 반환한다. 쓰지 못했을 경우 0을 반환한다.*/
+int
+process_file_write(int fd, void *buffer, unsigned size) {
+  if(fd == 1) {
+    putbuf(buffer, size);
+    return size;
+  }
+
+  struct file **fdt = thread_current()->fdt;
+  if(fdt[fd] == NULL) {
+    return 0;
+  }
+
+  return file_write(fdt[fd], buffer, size);
+}
+
+void 
+process_file_seek (int fd, unsigned position) {
+  struct file **fdt = thread_current()->fdt;
+  ASSERT (fdt[fd] != NULL);
+
+  return file_seek(fdt[fd], position);
+}
+
+unsigned 
+process_file_tell (int fd) {
+  struct file **fdt = thread_current()->fdt;
+  ASSERT (fdt[fd] != NULL);
+  return file_tell(fdt[fd]);
+}
+
+void 
+process_file_close (int fd) {
+  if(process_is_reserved_fd(fd)) {
+    return;
+  }
+  
+  struct file **fdt = thread_current()->fdt;
+  ASSERT (fdt[fd] != NULL);
+
+  file_close(fdt[fd]);
+  fdt[fd] = NULL;
+}
+
+bool
+process_is_reserved_fd(int fd) {
+  if(fd == 0 || fd == 1 || fd == 2 ) {
+    return true;
+  }
+
+  return false;
+}
+

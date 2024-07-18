@@ -76,6 +76,8 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+static void fd_init(struct file **fd);
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -189,6 +191,8 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
+  thread_event_init(t);
+  list_push_back(&(thread_current()->children_events),&(t->event->event_elem));
 
   /* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
@@ -319,12 +323,12 @@ thread_tid (void)
 /* Deschedules the current thread and destroys it.  Never
    returns to the caller. */
 void
-thread_exit (void) 
+thread_exit (int status) 
 {
   ASSERT (!intr_context ());
 
 #ifdef USERPROG
-  process_exit ();
+  process_exit (status);
 #endif
 
   /* Remove thread from all threads list, set our status to dying,
@@ -463,7 +467,7 @@ kernel_thread (thread_func *function, void *aux)
 
   intr_enable ();       /* The scheduler runs with interrupts off. */
   function (aux);       /* Execute the thread function. */
-  thread_exit ();       /* If function() returns, kill the thread. */
+  thread_exit (0);       /* If function() returns, kill the thread. */
 }
 
 /* Returns the running thread. */
@@ -503,6 +507,27 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
+
+  #ifdef USERPROG
+  fd_init(t->fdt);
+  #endif
+}
+
+struct thread_event *
+thread_event_init(struct thread *t) {
+  list_init(&(t->children_events));
+  t->event = malloc(sizeof(struct thread_event));
+  t->event->tid = t->tid;
+  sema_init(&(t->event->start_wait), 0);
+  sema_init(&(t->event->exit_wait), 0);
+  t->event->is_exited = false;
+}
+
+static void
+fd_init(struct file **fdt) {
+  for(int i=0 ; i<FDT_SIZE ; i++) {
+    fdt[i] = NULL;
+  }
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -614,7 +639,22 @@ allocate_tid (void)
 
   return tid;
 }
-
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+struct thread_event *
+thread_get_child_event_or_null(tid_t child_tid) {
+  struct list *childrent_events = &(thread_current()->children_events);
+
+  struct list_elem *child_thread_event_elem = list_begin(childrent_events);
+  while(list_end(childrent_events) != child_thread_event_elem) {
+    struct thread_event *child_thread_event = list_entry(child_thread_event_elem, struct thread_event, event_elem);
+    if(child_thread_event->tid == child_tid) {
+      return child_thread_event;
+    }
+    child_thread_event_elem = list_next(child_thread_event_elem);
+  }
+
+  return NULL;
+}

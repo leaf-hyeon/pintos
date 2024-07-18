@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -24,6 +25,8 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+#define NOT_PRESERVED_FD 3
+#define FDT_SIZE 128
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -98,11 +101,26 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct list children_events;
+    struct thread_event *event;
+    struct file *fdt[128]; /* file desrcriptor table*/
+    struct file *excute_file;
 #endif
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
+
+struct thread_event
+   {
+      tid_t tid;
+      struct semaphore start_wait;
+      bool start_success;
+      struct semaphore exit_wait;
+      int exit_status;
+      bool is_exited;
+      struct list_elem event_elem;
+   };
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -128,7 +146,7 @@ struct thread *thread_current (void);
 tid_t thread_tid (void);
 const char *thread_name (void);
 
-void thread_exit (void) NO_RETURN;
+void thread_exit (int status) NO_RETURN;
 void thread_yield (void);
 
 /* Performs some operation on thread t, given auxiliary data AUX. */
@@ -143,4 +161,6 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+struct thread_event *thread_get_child_event_or_null(tid_t child_tid);
+struct thread_event *thread_event_init(struct thread *t);
 #endif /* threads/thread.h */
