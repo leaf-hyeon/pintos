@@ -28,7 +28,8 @@
             ],
             "defines": [
                 "FILESYS",
-                "USERPROG"
+                "USERPROG",
+                "VM"
             ],
             "compilerPath": "/usr/bin/clang",
             "cStandard": "c11",
