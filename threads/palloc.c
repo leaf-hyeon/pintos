@@ -10,6 +10,7 @@
 #include "threads/loader.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "vm/frame.h"
 
 /* Page allocator.  Hands out memory in page-size (or
    page-multiple) chunks.  See malloc.h for an allocator that
@@ -35,6 +36,9 @@ struct pool
 
 /* Two pools: one for kernel data, one for user pages. */
 static struct pool kernel_pool, user_pool;
+
+static struct frame *frame_table;
+static int FRAME_TABLE_SIZE;
 
 static void init_pool (struct pool *, void *base, size_t page_cnt,
                        const char *name);
@@ -81,13 +85,19 @@ palloc_get_multiple (enum palloc_flags flags, size_t page_cnt)
   page_idx = bitmap_scan_and_flip (pool->used_map, 0, page_cnt, false);
   lock_release (&pool->lock);
 
-  if (page_idx != BITMAP_ERROR)
+  if (page_idx != BITMAP_ERROR) {
     pages = pool->base + PGSIZE * page_idx;
-  else
+  }
+  else {
+    // frame eviction
     pages = NULL;
+  }
 
   if (pages != NULL) 
     {
+      if(flags & PAL_USER) {
+        frame_allocate(pages);
+      }
       if (flags & PAL_ZERO)
         memset (pages, 0, PGSIZE * page_cnt);
     }

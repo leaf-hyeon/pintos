@@ -21,6 +21,7 @@
 #include "devices/timer.h"
 #include "devices/input.h"
 #include "lib/kernel/stdio.h"
+#include "vm/sup-page-table.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -144,6 +145,7 @@ process_exit (int status)
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
+      spt_destory(cur->spt);
     }
 
   cur->event->exit_status = status;
@@ -277,6 +279,7 @@ load (const char *task, void (**eip) (void), void **esp)
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
+  t->spt = spt_create();
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
@@ -387,7 +390,7 @@ copy_task(char *task) {
 }
 /* load() helpers. */
 
-static bool install_page (void *upage, void *kpage, bool writable);
+static bool install_page (void *upage, bool writable, struct file_read_info *fri);
 
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
@@ -465,25 +468,38 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
-        return false;
+      if(page_zero_bytes == PGSIZE) {
+        install_page(upage, writable, NULL);
+      } else {
+        struct file_read_info *fri = malloc(sizeof(struct file_read_info));
+        struct file *page_read_file = file_reopen(file);
 
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
+        file_seek(page_read_file, file_tell(file));
+        fri->file = page_read_file;
+        fri->read_bytes = page_read_bytes;
 
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
+        install_page(upage, writable, fri);
+      }
+
+      // /* Get a page of memory. */
+      // uint8_t *kpage = palloc_get_page (PAL_USER);
+      // if (kpage == NULL)
+      //   return false;
+
+      // /* Load this page. */
+      // if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+      //   {
+      //     palloc_free_page (kpage);
+      //     return false; 
+      //   }
+      // memset (kpage + page_read_bytes, 0, page_zero_bytes);
+
+      // /* Add the page to the process's address space. */
+      // if (!install_page (upage, kpage, writable)) 
+      //   {
+      //     palloc_free_page (kpage);
+      //     return false; 
+      //   }
 
       /* Advance. */
       read_bytes -= page_read_bytes;
@@ -500,18 +516,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp, char *task) 
 {
-  uint8_t *kpage;
   bool success = false;
-
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL) 
-    {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE;
-      else
-        palloc_free_page (kpage);
-    }
+  success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, true, NULL);
+  if (success) {
+    *esp = PHYS_BASE;
+  } else {
+    PANIC("setup stack fail!!!! pintos panic.....");
+  }
 
   int argc = get_arg_count(task);
   char **task_array = get_arg(task);
@@ -554,7 +565,7 @@ setup_stack (void **esp, char *task)
   typedef return_address *return_address_ptr;
   *esp-=4;
   *(return_address_ptr)(*esp) = NULL;
-  // hex_dump(*esp, *esp, 100, true);
+  hex_dump(*esp, *esp, 100, true);
   return success;
 }
 
@@ -605,14 +616,16 @@ get_arg(char *task) {
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
 static bool
-install_page (void *upage, void *kpage, bool writable)
+install_page (void *upage, bool writable, struct file_read_info *fri)
 {
   struct thread *t = thread_current ();
 
   /* Verify that there's not already a page at that virtual
      address, then map our page there. */
-  return (pagedir_get_page (t->pagedir, upage) == NULL
-          && pagedir_set_page (t->pagedir, upage, kpage, writable));
+  // return (pagedir_get_page (t->pagedir, upage) == NULL
+  //         && pagedir_set_page (t->pagedir, upage, kpage, writable));
+
+  return pagedir_set_page(t->pagedir, t->spt, upage, writable, fri);
 }
 
 unsigned int

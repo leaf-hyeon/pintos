@@ -67,7 +67,10 @@
         "main.h": "c",
         "lib.h": "c",
         "exception.h": "c",
-        "ide.h": "c"
+        "ide.h": "c",
+        "hash.h": "c",
+        "sup-page-table.h": "c",
+        "swap.h": "c"
     },
     "C_Cpp.intelliSenseEngine": "Default",
     "C_Cpp.loggingLevel": "Information"

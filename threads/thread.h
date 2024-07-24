@@ -100,7 +100,9 @@ struct thread
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
+    
     uint32_t *pagedir;                  /* Page directory. */
+    struct spt *spt;
     struct list children_events;
     struct thread_event *event;
     struct file *fdt[128]; /* file desrcriptor table*/
@@ -121,6 +123,7 @@ struct thread_event
       bool is_exited;
       struct list_elem event_elem;
    };
+
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
