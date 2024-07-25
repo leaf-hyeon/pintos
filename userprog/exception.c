@@ -156,8 +156,7 @@ page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
 
   struct thread *cur = thread_current();
-  void *upage = ((uint32_t)fault_addr & ~PGMASK);
-  struct spte *spte = sup_page_get_page(cur->spt, upage);
+  struct spte *spte = sup_page_get_page(cur->spt, fault_addr);
   
   if(user && spte == NULL) {
    printf ("Page fault at %p: %s error %s page in %s context.\n",
@@ -177,6 +176,7 @@ page_fault (struct intr_frame *f)
       file_close(spte->fri->file);
    }
   }
+  void *upage = ((uint32_t)fault_addr & ~PGMASK);
   pagedir_map_page(cur->pagedir, cur->spt, kpage, upage);
 
 

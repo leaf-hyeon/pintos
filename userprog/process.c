@@ -481,6 +481,8 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
         install_page(upage, writable, fri);
       }
 
+      file_seek(file, file_tell(file) + page_read_bytes);
+
       // /* Get a page of memory. */
       // uint8_t *kpage = palloc_get_page (PAL_USER);
       // if (kpage == NULL)
@@ -565,7 +567,6 @@ setup_stack (void **esp, char *task)
   typedef return_address *return_address_ptr;
   *esp-=4;
   *(return_address_ptr)(*esp) = NULL;
-  hex_dump(*esp, *esp, 100, true);
   return success;
 }
 

@@ -51,7 +51,8 @@ sup_page_set_page_lazy(struct spt *spt, void *upage, bool writable, struct file_
 }
 
 struct spte *
-sup_page_get_page(struct spt *spt, void *upage) {
+sup_page_get_page(struct spt *spt, void *addr) {
+    void *upage = ((uint32_t)addr & ~PGMASK);
     struct spte spte;
     spte.upage = upage;
     struct hash_elem *elem = hash_find(spt, &spte.hash_elem);

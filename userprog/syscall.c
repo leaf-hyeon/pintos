@@ -11,6 +11,7 @@
 #include "filesys/file.h"
 #include "lib/kernel/stdio.h"
 #include "threads/synch.h"
+#include "vm/sup-page-table.h"
 
 static struct lock filesys_lock;
 
@@ -48,7 +49,6 @@ syscall_handler (struct intr_frame *f)
     exit(-1);
   }
   int system_call_number = *(int *)(f->esp);
-  printf("syscall! number is:%d\n", system_call_number);
   switch(system_call_number) {
     case SYS_HALT:
       halt();
@@ -278,8 +278,7 @@ validate_user_stack_args(void *addr) {
 
 static bool
 check_is_unmapped_user_vaddr(void *addr) {
-  // 가상 메모리 구현시 로직 변경 필요
-  if(is_user_vaddr(addr) && pagedir_get_page(thread_current()->pagedir, addr) == NULL) {
+  if(is_user_vaddr(addr) && sup_page_get_page(thread_current()->spt, addr) == NULL) {
     return true;
   }
 
