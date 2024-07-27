@@ -10,12 +10,18 @@
 #include "threads/palloc.h"
 #include "userprog/pagedir.h"
 #include "vm/swap.h"
+#include <round.h>
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
+
+static bool is_invalid_addr(void *fault_addr);
+static bool is_stack_growth(void *esp, void *fault_addr);
+
+static unsigned STACK_MAX_SIZE = 8 * 1024 * 1024; /* byte size */
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
@@ -158,13 +164,25 @@ page_fault (struct intr_frame *f)
   struct thread *cur = thread_current();
   struct spte *spte = sup_page_get_page(cur->spt, fault_addr);
   
-  if(user && spte == NULL) {
-   printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-   kill (f);
+  if(is_invalid_addr(fault_addr)) {
+   ASSERT(user);
+   if(is_stack_growth(f->esp, fault_addr)) {
+      int stack_growth_page_num = DIV_ROUND_UP(cur->user_stack_bottom_page - fault_addr, PGSIZE);
+      void *stack_next_bottom_page;
+      for(int i=0 ; i<stack_growth_page_num ; i++) {
+         stack_next_bottom_page = (uint32_t)(cur->user_stack_bottom_page) & ~PGMASK - (i + 1) * PGSIZE;
+         pagedir_set_page(cur->pagedir, cur->spt, stack_next_bottom_page, true, NULL);
+      }
+      cur->user_stack_bottom_page = stack_next_bottom_page;
+      return;
+   } else {
+      printf ("Page fault at %p: %s error %s page in %s context.\n",
+            fault_addr,
+            not_present ? "not present" : "rights violation",
+            write ? "writing" : "reading",
+            user ? "user" : "kernel");
+      kill (f);
+   }
   }
  
   void *kpage = palloc_get_page(PAL_USER | PAL_ZERO);
@@ -184,5 +202,29 @@ page_fault (struct intr_frame *f)
 //      body, and replace it with code that brings in the page to
 //      which fault_addr refers. */
    
+}
+
+static bool
+is_invalid_addr(void *fault_addr) {
+   struct thread *cur = thread_current();
+   struct spte *spte = sup_page_get_page(cur->spt, fault_addr);
+   if(spte == NULL) {
+      return true;
+   }
+
+   return false;
+}
+
+static bool
+is_stack_growth(void *esp, void *fault_addr) {
+   if(esp - fault_addr > 32) {
+      return false;
+   }
+
+   if(PHYS_BASE - fault_addr <= STACK_MAX_SIZE && PHYS_BASE > fault_addr) {
+      return true;
+   }
+
+   return false;
 }
 

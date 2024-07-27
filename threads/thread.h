@@ -107,6 +107,7 @@ struct thread
     struct thread_event *event;
     struct file *fdt[128]; /* file desrcriptor table*/
     struct file *excute_file;
+    void *user_stack_bottom_page;
 #endif
 
     /* Owned by thread.c. */
