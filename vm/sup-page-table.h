@@ -29,7 +29,8 @@ struct swap_read_info {
 struct spt *spt_create();
 void sup_page_set_zero_page_lazy(struct spt *spt, void *upage, bool writable);
 void sup_page_set_page_lazy(struct spt *spt, void *upage, bool writable, struct file_read_info *fri);
-struct spte * sup_page_get_page(struct spt *spt, void *upage);
+struct spte * sup_page_get_page(struct spt *spt, void *addr);
+void sup_page_clear_page(struct spt *spt , struct spte *spte);
 void spt_destory(struct spt *spt);
 
 

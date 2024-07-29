@@ -60,6 +60,12 @@ sup_page_get_page(struct spt *spt, void *addr) {
 }
 
 void
+sup_page_clear_page(struct spt *spt , struct spte *spte) {
+    hash_delete(&spt->spt, &spte->hash_elem);
+    free(spte);
+}
+
+void
 spt_destory(struct spt *spt) {
     hash_destroy(&spt->spt, spte_destory);
 }

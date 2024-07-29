@@ -27,6 +27,8 @@ typedef int tid_t;
 
 #define NOT_PRESERVED_FD 3
 #define FDT_SIZE 128
+
+#define STACK_MAX_SIZE (8 * 1024 * 1024) /* byte size */
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -105,7 +107,8 @@ struct thread
     struct spt *spt;
     struct list children_events;
     struct thread_event *event;
-    struct file *fdt[128]; /* file desrcriptor table*/
+    struct file *fdt[128]; /* file desrcriptor table */
+    struct mmap *mmapt[128]; /* memory mapped file table */
     struct file *excute_file;
     void *user_stack_bottom_page;
 #endif
@@ -167,4 +170,6 @@ int thread_get_load_avg (void);
 
 struct thread_event *thread_get_child_event_or_null(tid_t child_tid);
 struct thread_event *thread_event_init(struct thread *t);
+
+bool thread_is_user_stack_addr_space(void *addr);
 #endif /* threads/thread.h */

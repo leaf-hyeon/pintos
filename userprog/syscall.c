@@ -12,6 +12,9 @@
 #include "lib/kernel/stdio.h"
 #include "threads/synch.h"
 #include "vm/sup-page-table.h"
+#include <round.h>
+#include "threads/malloc.h"
+#include "vm/mmap.h"
 
 static struct lock filesys_lock;
 
@@ -33,6 +36,9 @@ static int write (int fd, void *buffer, unsigned size);
 static void seek (int fd, unsigned position);
 static unsigned tell (int fd);
 static void close (int fd);
+static int mmap (int fd, void *addr);
+static bool validate_mmap(int fd, void *addr);
+static void munmap (int mapping);
 
 void
 syscall_init (void) 
@@ -127,6 +133,18 @@ syscall_handler (struct intr_frame *f)
         exit(-1);
       }
       close(*(int *)(f->esp + 4));
+      break;
+    case SYS_MMAP:
+      if(!validate_user_stack_args(f->esp+16) || !validate_user_stack_args(f->esp+20)) {
+        exit(-1);
+      }
+      f->eax = mmap(*(int *)(f->esp +16), *(void **)(f->esp +20));
+      break;
+    case SYS_MUNMAP:
+      if(!validate_user_stack_args(f->esp+4)) {
+        exit(-1);
+      }
+      munmap(*(int *)(f->esp +4));
       break;
   }
 }
@@ -265,6 +283,54 @@ close (int fd) {
   struct file **fdt = thread_current()->fdt;
   process_file_close(fd);
   lock_release(&filesys_lock);
+}
+
+static int 
+mmap (int fd, void *addr) {
+  if(!validate_mmap(fd, addr)) {
+    return -1;
+  }
+  return mmap_mapping(fd, addr);
+}
+
+static void 
+munmap (int mapping) {
+  mmap_unmap(mapping);
+}
+
+static bool
+validate_mmap(int fd, void *addr) {
+  if(addr == 0){
+      return false;
+  }
+
+  if(fd<0 || fd>=FDT_SIZE || thread_current()->fdt[fd] == NULL) {
+    return false;
+  }
+
+  if(process_is_reserved_fd(fd)) {
+      return false;
+  }
+  int f_size = filesize(fd);
+  if(f_size == 0) {
+      return false;
+  }
+  if(addr != pg_round_down(addr)) {
+      return false;
+  }
+
+  int page_num = DIV_ROUND_UP(f_size, PGSIZE);
+  for(int i=0 ; i<page_num ; i++) {
+      if(!check_is_unmapped_user_vaddr(addr + i * PGSIZE)) {
+        return false;
+      }
+  }
+
+  if(thread_is_user_stack_addr_space(addr)) {
+      return false;
+  }
+
+  return true;
 }
 
 static bool

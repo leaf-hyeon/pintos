@@ -661,3 +661,12 @@ thread_get_child_event_or_null(tid_t child_tid) {
 
   return NULL;
 }
+
+bool 
+thread_is_user_stack_addr_space(void *addr) {
+  if(PHYS_BASE > addr && (uint32_t) PHYS_BASE - (uint32_t)addr <= STACK_MAX_SIZE) {
+    return true;
+  }
+
+  return false;
+}

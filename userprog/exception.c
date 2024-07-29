@@ -21,8 +21,6 @@ static void page_fault (struct intr_frame *);
 static bool is_invalid_addr(void *fault_addr);
 static bool is_stack_growth(void *esp, void *fault_addr);
 
-static unsigned STACK_MAX_SIZE = 8 * 1024 * 1024; /* byte size */
-
 /* Registers handlers for interrupts that can be caused by user
    programs.
 
@@ -190,8 +188,7 @@ page_fault (struct intr_frame *f)
    swap_in(cur->pagedir, cur->spt, spte->sri->sector, kpage);
   } else {
    if(spte->fri != NULL) {
-      file_read(spte->fri->file, kpage ,spte->fri->read_bytes);
-      file_close(spte->fri->file);
+      file_read_at(spte->fri->file, kpage ,spte->fri->read_bytes, file_tell(spte->fri->file));
    }
   }
   void *upage = ((uint32_t)fault_addr & ~PGMASK);
@@ -221,7 +218,7 @@ is_stack_growth(void *esp, void *fault_addr) {
       return false;
    }
 
-   if(PHYS_BASE - fault_addr <= STACK_MAX_SIZE && PHYS_BASE > fault_addr) {
+   if(thread_is_user_stack_addr_space(fault_addr)) {
       return true;
    }
 

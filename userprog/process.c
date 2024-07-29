@@ -22,10 +22,12 @@
 #include "devices/input.h"
 #include "lib/kernel/stdio.h"
 #include "vm/sup-page-table.h"
+#include "vm/mmap.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static void process_fdt_close(struct file **fdt);
+static void process_mmap_close(struct mmap **mmapt);
 static void free_exit_children_event(struct list *children_evenets);
 static char* copy_task(char *task);
 
@@ -129,6 +131,12 @@ process_exit (int status)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+  cur->event->exit_status = status;
+  process_fdt_close(cur->fdt);
+  process_mmap_close(cur->mmapt);
+  file_close(cur->excute_file);
+  sema_up(&(cur->event->exit_wait));
+  free_exit_children_event(&(cur->children_events));
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -147,12 +155,6 @@ process_exit (int status)
       pagedir_destroy (pd);
       spt_destory(cur->spt);
     }
-
-  cur->event->exit_status = status;
-  process_fdt_close(cur->fdt);
-  file_close(cur->excute_file);
-  sema_up(&(cur->event->exit_wait));
-  free_exit_children_event(&(cur->children_events));
 }
 
 static void
@@ -160,6 +162,15 @@ process_fdt_close(struct file **fdt) {
   for(int i=0 ; i<FDT_SIZE ; i++) {
     if(fdt[i] != NULL) {
       file_close(fdt[i]);
+    }
+  }
+}
+
+static void
+process_mmap_close(struct mmap **mmapt) {
+  for(int i=0 ; i<FDT_SIZE ; i++) {
+    if(mmapt[i] != NULL) {
+      mmap_unmap(i);
     }
   }
 }
