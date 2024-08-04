@@ -4,10 +4,10 @@
             "type": "gdb",
             "request": "attach",
             "name": "Attach to gdbserver : threads",
-            "executable": "/pintos/vm/build/kernel.o",
+            "executable": "/pintos/filesys/build/kernel.o",
             "target": "localhost:1234",
             "remote": true,
-            "cwd": "/pintos/vm",
+            "cwd": "/pintos/filesys",
             "valuesFormatting": "parseText"
         }
     ]
