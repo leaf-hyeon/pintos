@@ -11,6 +11,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "vm/frame.h"
+#include "userprog/pagedir.h"
 
 /* Page allocator.  Hands out memory in page-size (or
    page-multiple) chunks.  See malloc.h for an allocator that
@@ -84,22 +85,31 @@ palloc_get_multiple (enum palloc_flags flags, size_t page_cnt)
   lock_acquire (&pool->lock);
   page_idx = bitmap_scan_and_flip (pool->used_map, 0, page_cnt, false);
   lock_release (&pool->lock);
-
+ 
   if (page_idx != BITMAP_ERROR) {
     pages = pool->base + PGSIZE * page_idx;
   }
   else {
-    // frame eviction
-    pages = NULL;
+    // 1개 frame 할당할때는 evict 전략
+    if(page_cnt == 1) {
+      struct frame *frame = frame_evict();
+      int evict_page_idx = ((uint32_t)frame->kpage - (uint32_t)pool->base)/PGSIZE;
+      pagedir_page_out(frame->pd, frame->spt, frame->upage);
+      pages = frame->kpage;
+    } else {
+      pages = NULL;
+    }
   }
 
   if (pages != NULL) 
     {
       if(flags & PAL_USER) {
-        frame_allocate(pages);
+        for(int i=0 ;i< page_cnt ;i++){
+          frame_allocate(pages + i*PGSIZE);
+        }
       }
       if (flags & PAL_ZERO)
-        memset (pages, 0, PGSIZE * page_cnt);
+      memset (pages, 0, PGSIZE * page_cnt);
     }
   else 
     {
@@ -149,6 +159,9 @@ palloc_free_multiple (void *pages, size_t page_cnt)
 
   ASSERT (bitmap_all (pool->used_map, page_idx, page_cnt));
   bitmap_set_multiple (pool->used_map, page_idx, page_cnt, false);
+  for(int i=0; i<page_cnt ;i++) {
+    frame_free(pages + i*PGSIZE);
+  }
 }
 
 /* Frees the page at PAGE. */

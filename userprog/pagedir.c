@@ -7,9 +7,18 @@
 #include "threads/palloc.h"
 #include "vm/sup-page-table.h"
 #include "vm/frame.h"
+#include "threads/synch.h"
 
 static uint32_t *active_pd (void);
 static void invalidate_pagedir (uint32_t *);
+static bool pagedir_map_frame (uint32_t *pd, struct spt *spt, void *kpage, void *upage);
+
+static struct lock pagedir_lock;
+
+void
+pagedir_init() {
+  lock_init(&pagedir_lock);
+}
 
 /* Creates a new page directory that has mappings for kernel
    virtual addresses, but none for user virtual addresses.
@@ -122,8 +131,8 @@ pagedir_set_page (uint32_t *pd, struct spt *spt, void *upage, bool writable, str
     return false;
 }
 
-bool 
-pagedir_map_page (uint32_t *pd, struct spt *spt, void *kpage, void *upage) {
+static bool 
+pagedir_map_frame (uint32_t *pd, struct spt *spt, void *kpage, void *upage) {
   ASSERT (pg_ofs (kpage) == 0);
   ASSERT (vtop (kpage) >> PTSHIFT < init_ram_pages);
   ASSERT (pd != init_page_dir);
@@ -131,12 +140,31 @@ pagedir_map_page (uint32_t *pd, struct spt *spt, void *kpage, void *upage) {
   uint32_t *pte = lookup_page(pd, upage, false);
   struct spte *spte = sup_page_get_page(spt, upage);
   if(pte != NULL) {
+    bool dirty = pagedir_is_dirty(pd, upage);
+    bool accessed = pagedir_is_accessed(pd, upage);
     *pte = pte_create_user(kpage, spte->writable);
-    frame_map_page(pd, kpage, upage);
+    if(dirty) {
+      *pte |= PTE_A;
+    }
+    if(accessed) {
+      *pte |= PTE_D;
+    }
+    frame_map_page(pd, spt, kpage, upage);
     return true;
   } else {
     return false;
   }
+}
+
+void
+pagedir_delete_page(uint32_t *pd, struct spt *spt, void *upage) {
+  uint32_t *pte = lookup_page(pd, upage, false);
+  if(*pte & PTE_P) {
+    palloc_free_page(ptov(*pte & ~PGMASK));
+  }
+
+  pagedir_clear_page(pd, upage);
+  sup_page_clear_page(spt, upage);
 }
 
 /* Looks up the physical address that corresponds to user virtual
@@ -281,4 +309,21 @@ invalidate_pagedir (uint32_t *pd)
          "Translation Lookaside Buffers (TLBs)". */
       pagedir_activate (pd);
     } 
+}
+
+void
+pagedir_page_in(uint32_t *pd, struct spt *spt, void *upage) {
+  lock_acquire(&pagedir_lock);
+  void *kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+  spt_read_page_in(spt, upage, kpage);
+  pagedir_map_frame(pd, spt, kpage, upage);
+  lock_release(&pagedir_lock);
+}
+
+void
+pagedir_page_out(uint32_t *pd, struct spt *spt, void *upage) {
+  if(pagedir_is_dirty(pd, upage)) {
+    spt_write_page_out(spt, upage);
+  }
+  pagedir_clear_page(pd, upage);
 }

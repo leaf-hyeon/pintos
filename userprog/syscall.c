@@ -237,6 +237,11 @@ read(int fd, void *buffer, unsigned size) {
     lock_release(&filesys_lock);
     exit(-1);
   }
+  struct spte *spte = sup_page_get_page(thread_current()->spt, buffer);
+  if(!spte->writable) {
+    lock_release(&filesys_lock);
+    exit(-1);
+  }
   int read_byte = process_file_read(fd, buffer, size);
   lock_release(&filesys_lock);
 

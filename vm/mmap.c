@@ -4,6 +4,7 @@
 #include "threads/thread.h"
 #include "filesys/file.h"
 #include "vm/sup-page-table.h"
+#include "userprog/pagedir.h"
 
 int 
 mmap_mapping(int fd, void *addr) {
@@ -24,9 +25,7 @@ mmap_mapping(int fd, void *addr) {
         file_seek(read_file, file_offset);
         fri->file = read_file;
         fri->read_bytes = read_bytes;
-
         pagedir_set_page(t->pagedir, t->spt, next_page, true, fri);
-        struct spte *spte = sup_page_get_page(t->spt, next_page);
 
         file_offset += read_bytes;
         total_read_bytes -= read_bytes;
@@ -34,8 +33,8 @@ mmap_mapping(int fd, void *addr) {
     }
   
     struct mmap *mmap = malloc(sizeof(struct mmap));
-    mmap->file_size = f_size;
     mmap->page = addr;
+    mmap->file = file_reopen(t->fdt[fd]);
     t->mmapt[fd] = mmap;
     return fd;
 }
@@ -45,19 +44,21 @@ mmap_unmap(int mapping) {
     struct thread *t = thread_current();
     struct mmap *mmap = t->mmapt[mapping];
     int page_num = mmap_get_page_num(mmap);  
+    int total_read_bytes = file_length(mmap->file);
     for(int i=0 ; i<page_num ; i++) {
+        int read_bytes = total_read_bytes < PGSIZE ? total_read_bytes : PGSIZE;
         void *page = mmap->page + i * PGSIZE;
-        struct spte *spte = sup_page_get_page(t->spt, page);
         if(pagedir_is_dirty(t->pagedir, page)) {
-            file_write(spte->fri->file, page, spte->fri->read_bytes);
+            file_write(mmap->file, page, read_bytes);
         }
-        pagedir_clear_page(t->pagedir, page);
-        sup_page_clear_page(t->spt, spte);
+        pagedir_delete_page(t->pagedir, t->spt, page);
+        total_read_bytes-=read_bytes;
     }
     t->mmapt[mapping] = NULL;
+    file_close(mmap->file);
     free(mmap);
 }
 
 int mmap_get_page_num(struct mmap *mmap) {
-    return DIV_ROUND_UP(mmap->file_size, PGSIZE);
+    return DIV_ROUND_UP(file_length(mmap->file), PGSIZE);
 }

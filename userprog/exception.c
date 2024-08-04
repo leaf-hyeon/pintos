@@ -18,7 +18,7 @@ static long long page_fault_cnt;
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
 
-static bool is_invalid_addr(void *fault_addr);
+static bool is_invalid_addr(uint32_t error_code, void *fault_addr);
 static bool is_stack_growth(void *esp, void *fault_addr);
 
 /* Registers handlers for interrupts that can be caused by user
@@ -162,8 +162,7 @@ page_fault (struct intr_frame *f)
   struct thread *cur = thread_current();
   struct spte *spte = sup_page_get_page(cur->spt, fault_addr);
   
-  if(is_invalid_addr(fault_addr)) {
-   ASSERT(user);
+  if(is_invalid_addr(f->error_code, fault_addr)) {
    if(is_stack_growth(f->esp, fault_addr)) {
       int stack_growth_page_num = DIV_ROUND_UP(cur->user_stack_bottom_page - fault_addr, PGSIZE);
       void *stack_next_bottom_page;
@@ -181,19 +180,10 @@ page_fault (struct intr_frame *f)
             user ? "user" : "kernel");
       kill (f);
    }
-  }
- 
-  void *kpage = palloc_get_page(PAL_USER | PAL_ZERO);
-  if(spte->is_swapped) {
-   swap_in(cur->pagedir, cur->spt, spte->sri->sector, kpage);
   } else {
-   if(spte->fri != NULL) {
-      file_read_at(spte->fri->file, kpage ,spte->fri->read_bytes, file_tell(spte->fri->file));
-   }
+   void *upage = ((uint32_t)fault_addr & ~PGMASK);
+   pagedir_page_in(cur->pagedir, cur->spt, upage);
   }
-  void *upage = ((uint32_t)fault_addr & ~PGMASK);
-  pagedir_map_page(cur->pagedir, cur->spt, kpage, upage);
-
 
 //   /* To implement virtual memory, delete the rest of the function
 //      body, and replace it with code that brings in the page to
@@ -202,10 +192,15 @@ page_fault (struct intr_frame *f)
 }
 
 static bool
-is_invalid_addr(void *fault_addr) {
+is_invalid_addr(uint32_t error_code, void *fault_addr) {
+   bool write = (error_code & PF_W) != 0;
    struct thread *cur = thread_current();
    struct spte *spte = sup_page_get_page(cur->spt, fault_addr);
    if(spte == NULL) {
+      return true;
+   }
+
+   if(!spte->writable && write) {
       return true;
    }
 

@@ -40,6 +40,7 @@
 #include "vm/frame.h"
 #include "vm/sup-page-table.h"
 #include "vm/swap.h"
+#include "userprog/pagedir.h"
 
 /* Page directory with kernel mappings only. */
 uint32_t *init_page_dir;
@@ -102,6 +103,7 @@ int main(void)
   thread_event_init(thread_current());
   frame_init();
   paging_init();
+  pagedir_init();
 
   /* Segmentation. */
 #ifdef USERPROG

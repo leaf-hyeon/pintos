@@ -4,8 +4,8 @@
 
 #include "vm/sup-page-table.h"
 void swap_init();
-void swap_in(uint32_t *pd, struct spt *spt, block_sector_t sector, void *kpage);
-block_sector_t swap_out(void *upage);
+void swap_read(block_sector_t sector, void *kpage);
+block_sector_t swap_write(void *upage);
 
 
 #endif

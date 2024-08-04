@@ -1,8 +1,9 @@
 #include <stdbool.h>
 #include "filesys/file.h"
 #include "threads/pte.h"
-#include "threads/palloc.h"
 #include "vm/sup-page-table.h"
+#include "vm/swap.h"
+#include "threads/palloc.h"
 
 unsigned page_hash (const struct hash_elem *e, void *aux) {
     struct spte *spte = hash_entry(e, struct spte, hash_elem);
@@ -32,7 +33,6 @@ void
 sup_page_set_zero_page_lazy(struct spt *spt, void *upage, bool writable) {
     struct spte *spte = malloc(sizeof(struct spte));
     spte->upage = upage;
-    spte->is_swapped = false;
     spte->fri = NULL;
     spte->sri = NULL;
     spte->writable = writable;
@@ -43,7 +43,6 @@ void
 sup_page_set_page_lazy(struct spt *spt, void *upage, bool writable, struct file_read_info *fri) {
     struct spte *spte = malloc(sizeof(struct spte));
     spte->upage = upage;
-    spte->is_swapped = false;
     spte->fri = fri;
     spte->sri = NULL;
     spte->writable = writable;
@@ -60,7 +59,8 @@ sup_page_get_page(struct spt *spt, void *addr) {
 }
 
 void
-sup_page_clear_page(struct spt *spt , struct spte *spte) {
+sup_page_clear_page(struct spt *spt , void *upage) {
+    struct spte *spte = sup_page_get_page(spt, upage);
     hash_delete(&spt->spt, &spte->hash_elem);
     free(spte);
 }
@@ -68,4 +68,26 @@ sup_page_clear_page(struct spt *spt , struct spte *spte) {
 void
 spt_destory(struct spt *spt) {
     hash_destroy(&spt->spt, spte_destory);
+}
+
+void
+spt_read_page_in(struct spt *spt, void *upage, void *kpage) {
+    struct spte *spte = sup_page_get_page(spt, upage);
+    if(spte->sri != NULL) {
+        swap_read(spte->sri->sector, kpage);
+        free(spte->sri);
+        spte->sri = NULL;
+    } else if(spte->fri != NULL) {
+        file_read_at(spte->fri->file, kpage ,spte->fri->read_bytes, file_tell(spte->fri->file));
+    } else {
+        return;
+    }
+}
+
+void
+spt_write_page_out(struct spt *spt, void *upage) {
+    struct spte *spte = sup_page_get_page(spt, upage);
+    block_sector_t sector = swap_write(upage);
+    spte->sri = malloc(sizeof(struct swap_read_info));
+    spte->sri->sector = sector;
 }

@@ -4,7 +4,7 @@
 
 struct mmap {
     void *page;
-    int file_size;
+    struct file *file;
 };
 
 int mmap_mapping(int fd, void *addr);
