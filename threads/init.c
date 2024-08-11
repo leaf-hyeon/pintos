@@ -123,6 +123,7 @@ int main(void)
 
   /* Start thread scheduler and enable interrupts. */
   thread_start();
+  thread_lock_dump_start();
   serial_init_queue();
   timer_calibrate();
 

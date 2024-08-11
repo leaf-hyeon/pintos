@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -78,6 +79,9 @@ static tid_t allocate_tid (void);
 
 static void fd_init(struct file **fd);
 
+static struct list thread_lock_dump_list;
+static void thread_lock_dump();
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -100,12 +104,55 @@ thread_init (void)
   list_init (&ready_list);
   list_init (&all_list);
   list_init (&sleep_list);
+  list_init(&thread_lock_dump_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+}
+
+void 
+thread_lock_dump_start() {
+  thread_create("thread-lock-dump", PRI_DEFAULT, thread_lock_dump, NULL);
+}
+
+void
+thread_acquire_lock(struct lock *lock) {
+  enum intr_level old_level = intr_disable();
+  list_push_back(&thread_lock_dump_list, &lock->dump_elem);
+  intr_set_level (old_level);
+}
+
+void
+thread_release_lock(struct lock *lock) {
+  enum intr_level old_level = intr_disable();
+  list_remove(&lock->dump_elem);
+  intr_set_level (old_level);
+}
+
+static void
+thread_lock_dump() {
+  while(true) {
+    enum intr_level old_level = intr_disable();
+
+    for(struct list_elem *lock_elem = list_begin(&thread_lock_dump_list) ; lock_elem != list_end(&thread_lock_dump_list)
+    ; lock_elem = list_next(lock_elem)) {
+      struct lock *lock = list_entry(lock_elem, struct lock, dump_elem);
+      // printf("lock acquire tid:%d\n", lock->holder->tid);
+      for(struct list_elem *wait_elem = list_begin(&lock->semaphore.waiters) ; wait_elem != list_end(&lock->semaphore.waiters)
+      ; wait_elem = list_next(wait_elem)) {
+        struct thread *t = list_entry(wait_elem, struct thread, elem);
+        // printf("lock wait tid:%d\n", t->tid);
+      }
+      // printf("----------------------\n");
+    }
+    // printf("*************************\n");
+
+    intr_set_level (old_level);
+    timer_msleep(5000);
+  }
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -307,9 +354,6 @@ thread_current (void)
      have overflowed its stack.  Each thread has less than 4 kB
      of stack, so a few big automatic arrays or moderate
      recursion can cause stack overflow. */
-  // if(!is_thread(t)) {
-  //   printf("debug point!!!\n magic:%d\n", t->magic);
-  // }
   ASSERT (is_thread (t));
   ASSERT (t->status == THREAD_RUNNING);
 

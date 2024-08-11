@@ -244,21 +244,10 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       lock_acquire(&inode_lock);
       struct buffer_cache_entry *cache = get_buffer_entry(sector_idx);
       if(cache == NULL) {
-        caching(sector_idx);
+        cache = caching(sector_idx);
       }
-      memcpy (buffer + bytes_read, &(cache->data) + sector_ofs, chunk_size);
+      memcpy (buffer + bytes_read, cache->data + sector_ofs, chunk_size);  
       lock_release(&inode_lock);
-
-      // if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
-      //   { 
-      //     /* Read full sector directly into caller's buffer. */
-      //     memcpy(buffer +  bytes_read, &(cache->data), BLOCK_SECTOR_SIZE);
-      //   }
-      // else 
-      //   {
-      //     /* partially copy into caller's buffer. */
-      //     memcpy (buffer + bytes_read, &(cache->data) + sector_ofs, chunk_size);
-      //   }
       
       /* Advance. */
       size -= chunk_size;
@@ -280,6 +269,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
 {
   const uint8_t *buffer = buffer_;
   off_t bytes_written = 0;
+  block_sector_t sector_idx = -1;
 
   if (inode->deny_write_cnt)
     return 0;
@@ -287,7 +277,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   while (size > 0) 
     {
       /* Sector to write, starting byte offset within sector. */
-      block_sector_t sector_idx = byte_to_sector (inode, offset);
+      sector_idx = byte_to_sector (inode, offset);
       int sector_ofs = offset % BLOCK_SECTOR_SIZE;
 
       /* Bytes left in inode, bytes left in sector, lesser of the two. */
@@ -303,36 +293,13 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       lock_acquire(&inode_lock);
       struct buffer_cache_entry *cache = get_buffer_entry(sector_idx);
       if(cache == NULL) {
-        caching(sector_idx);
+        cache = caching(sector_idx);
       }
-      memcpy(&(cache->data) + sector_ofs, buffer + bytes_written, chunk_size);
+      if(memcmp(cache->data + sector_ofs, buffer + bytes_written, chunk_size) !=0) {
+        memcpy(cache->data + sector_ofs, buffer + bytes_written, chunk_size);
+        cache->dirty = true;
+      }
       lock_release(&inode_lock);
-
-      // if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
-      //   {
-      //     /* Write full sector directly to disk. */
-      //     block_write (fs_device, sector_idx, buffer + bytes_written);
-      //   }
-      // else 
-      //   {
-      //     /* We need a bounce buffer. */
-      //     if (bounce == NULL) 
-      //       {
-      //         bounce = malloc (BLOCK_SECTOR_SIZE);
-      //         if (bounce == NULL)
-      //           break;
-      //       }
-
-      //     /* If the sector contains data before or after the chunk
-      //        we're writing, then we need to read in the sector
-      //        first.  Otherwise we start with a sector of all zeros. */
-      //     if (sector_ofs > 0 || chunk_size < sector_left) 
-      //       block_read (fs_device, sector_idx, bounce);
-      //     else
-      //       memset (bounce, 0, BLOCK_SECTOR_SIZE);
-      //     memcpy (bounce + sector_ofs, buffer + bytes_written, chunk_size);
-      //     block_write (fs_device, sector_idx, bounce);
-      //   }
 
       /* Advance. */
       size -= chunk_size;
@@ -340,6 +307,13 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       bytes_written += chunk_size;
     }
 
+  // offset이 마지막으로 읽은 섹터 번호보다 뒤에 번호 이면서 그 섹터 번호가 현재 inode에 속해 있다면 read_ahead + 동기화
+  // inode에 대한것이 아니라 다음 sector 번호 (공간 지역성)에 대한 데이터를 캐시 하는것... 따라서 아래 코드는 buffer-cache로 옮겨야 한다.
+  lock_acquire(&inode_lock);
+  if((sector_idx != -1 && sector_idx < byte_to_sector(inode, offset)) && inode_length(inode) > offset) {
+    read_ahead(byte_to_sector(inode, offset));
+  }
+  lock_release(&inode_lock);
   return bytes_written;
 }
 

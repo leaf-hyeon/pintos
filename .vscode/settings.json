@@ -74,7 +74,8 @@
         "mmap.h": "c",
         "loader.h": "c",
         "frame.h": "c",
-        "buffer-cache.h": "c"
+        "buffer-cache.h": "c",
+        "thread": "c"
     },
     "C_Cpp.intelliSenseEngine": "Default",
     "C_Cpp.loggingLevel": "Information"

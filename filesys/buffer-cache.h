@@ -14,9 +14,10 @@ struct buffer_cache_entry {
 };
 
 void buffer_cache_init();
-struct buffer_cache_entry * get_buffer_entry(block_sector_t sector);
-void caching(block_sector_t sector);
+struct buffer_cache_entry *get_buffer_entry(block_sector_t sector);
+struct buffer_cache_entry *caching(block_sector_t sector);
 void write_back(struct buffer_cache_entry *cache);
 void write_back_all();
+void read_ahead(block_sector_t sector);
 
 #endif

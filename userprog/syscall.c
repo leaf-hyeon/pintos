@@ -217,7 +217,6 @@ open(char *file_name) {
 static int
 filesize(int fd) {
   if(!validate_fd(fd)) {
-    lock_release(&filesys_lock);
     exit(-1);
   }
   struct file **fdt = thread_current()->fdt;

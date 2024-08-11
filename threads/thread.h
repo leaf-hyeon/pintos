@@ -172,4 +172,10 @@ struct thread_event *thread_get_child_event_or_null(tid_t child_tid);
 struct thread_event *thread_event_init(struct thread *t);
 
 bool thread_is_user_stack_addr_space(void *addr);
+
+void thread_acquire_lock(struct lock *lock);
+void thread_release_lock(struct lock *lock);
+void thread_lock_dump_start();
+
+
 #endif /* threads/thread.h */
