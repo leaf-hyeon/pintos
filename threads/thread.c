@@ -115,21 +115,21 @@ thread_init (void)
 
 void 
 thread_lock_dump_start() {
-  thread_create("thread-lock-dump", PRI_DEFAULT, thread_lock_dump, NULL);
+  // thread_create("thread-lock-dump", PRI_DEFAULT, thread_lock_dump, NULL);
 }
 
 void
 thread_acquire_lock(struct lock *lock) {
-  enum intr_level old_level = intr_disable();
+  // enum intr_level old_level = intr_disable();
   list_push_back(&thread_lock_dump_list, &lock->dump_elem);
-  intr_set_level (old_level);
+  // intr_set_level (old_level);
 }
 
 void
 thread_release_lock(struct lock *lock) {
-  enum intr_level old_level = intr_disable();
+  // enum intr_level old_level = intr_disable();
   list_remove(&lock->dump_elem);
-  intr_set_level (old_level);
+  // intr_set_level (old_level);
 }
 
 static void
@@ -140,15 +140,15 @@ thread_lock_dump() {
     for(struct list_elem *lock_elem = list_begin(&thread_lock_dump_list) ; lock_elem != list_end(&thread_lock_dump_list)
     ; lock_elem = list_next(lock_elem)) {
       struct lock *lock = list_entry(lock_elem, struct lock, dump_elem);
-      // printf("lock acquire tid:%d\n", lock->holder->tid);
+      printf("lock acquire tid:%d\n", lock->holder->tid);
       for(struct list_elem *wait_elem = list_begin(&lock->semaphore.waiters) ; wait_elem != list_end(&lock->semaphore.waiters)
       ; wait_elem = list_next(wait_elem)) {
         struct thread *t = list_entry(wait_elem, struct thread, elem);
-        // printf("lock wait tid:%d\n", t->tid);
+        printf("lock wait tid:%d\n", t->tid);
       }
-      // printf("----------------------\n");
+      printf("----------------------\n");
     }
-    // printf("*************************\n");
+    printf("*************************\n");
 
     intr_set_level (old_level);
     timer_msleep(5000);

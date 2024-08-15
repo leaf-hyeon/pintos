@@ -9,6 +9,7 @@
 #include "threads/io.h"
 #include "threads/interrupt.h"
 #include "threads/synch.h"
+#include "threads/thread.h"
 
 /* The code in this file is an interface to an ATA (IDE)
    controller.  It attempts to comply to [ATA-3]. */
@@ -411,6 +412,7 @@ issue_pio_command (struct channel *c, uint8_t command)
   ASSERT (intr_get_level () == INTR_ON);
 
   c->expecting_interrupt = true;
+  printf("disk command request!!!!!!!!!!!!!!!!!!!!! tid:%d\n", thread_current()->tid);
   outb (reg_command (c), command);
 }
 
@@ -513,6 +515,7 @@ interrupt_handler (struct intr_frame *f)
       {
         if (c->expecting_interrupt) 
           {
+            printf("disk command finish!!!!!!!!!!!!!!!!!!!!!\n");
             inb (reg_status (c));               /* Acknowledge interrupt. */
             sema_up (&c->completion_wait);      /* Wake up waiter. */
           }

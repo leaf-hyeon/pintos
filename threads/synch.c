@@ -196,7 +196,7 @@ lock_acquire (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
 
-  if(lock_held_by_current_thread(lock) && lock->reentrant_cnt == 0) {
+  if(lock_held_by_current_thread(lock)) {
     lock->reentrant_cnt++;
     return;
   }

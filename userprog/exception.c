@@ -160,7 +160,6 @@ page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
 
   struct thread *cur = thread_current();
-  struct spte *spte = sup_page_get_page(cur->spt, fault_addr);
   
   if(is_invalid_addr(f->error_code, fault_addr)) {
    if(is_stack_growth(f->esp, fault_addr)) {

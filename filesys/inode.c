@@ -97,14 +97,16 @@ inode_create (block_sector_t sector, off_t length)
       disk_inode->magic = INODE_MAGIC;
       if (free_map_allocate (sectors, &disk_inode->start)) 
         {
-          block_write (fs_device, sector, disk_inode);
+          set_cache(sector, disk_inode);
+          // block_write (fs_device, sector, disk_inode);
           if (sectors > 0) 
             {
               static char zeros[BLOCK_SECTOR_SIZE];
               size_t i;
               
-              for (i = 0; i < sectors; i++) 
-                block_write (fs_device, disk_inode->start + i, zeros);
+              for (i = 0; i < sectors; i++)
+                set_cache(disk_inode->start + i, zeros);
+                // block_write (fs_device, disk_inode->start + i, zeros);
             }
           success = true; 
         } 
@@ -150,7 +152,9 @@ inode_open (block_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
-  block_read (fs_device, inode->sector, &inode->data);
+  struct buffer_cache_entry *cache = read_cache(inode->sector);
+  inode->data = *((struct inode_disk *)(&cache->data));
+  // block_read (fs_device, inode->sector, &inode->data);
   lock_release(&inode_lock);
   return inode;
 }
@@ -196,8 +200,12 @@ inode_close (struct inode *inode)
       if (inode->removed) 
         {
           free_map_release (inode->sector, 1);
-          free_map_release (inode->data.start,
-                            bytes_to_sectors (inode->data.length)); 
+          remove_cache(inode->sector);
+          size_t sectors = bytes_to_sectors(inode->data.length);
+          free_map_release (inode->data.start, sectors); 
+          for(int i=0 ; i<sectors ; i++) {
+            remove_cache(inode->data.start + i);
+          }
         }
 
       free (inode); 
@@ -242,10 +250,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
         break;
 
       lock_acquire(&inode_lock);
-      struct buffer_cache_entry *cache = get_buffer_entry(sector_idx);
-      if(cache == NULL) {
-        cache = caching(sector_idx);
-      }
+      struct buffer_cache_entry *cache = read_cache(sector_idx);
       memcpy (buffer + bytes_read, cache->data + sector_ofs, chunk_size);  
       lock_release(&inode_lock);
       
@@ -291,14 +296,8 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
         break;
 
       lock_acquire(&inode_lock);
-      struct buffer_cache_entry *cache = get_buffer_entry(sector_idx);
-      if(cache == NULL) {
-        cache = caching(sector_idx);
-      }
-      if(memcmp(cache->data + sector_ofs, buffer + bytes_written, chunk_size) !=0) {
-        memcpy(cache->data + sector_ofs, buffer + bytes_written, chunk_size);
-        cache->dirty = true;
-      }
+      struct buffer_cache_entry *cache = read_cache(sector_idx);
+      write_cache(cache, sector_ofs, buffer + bytes_written, chunk_size);
       lock_release(&inode_lock);
 
       /* Advance. */

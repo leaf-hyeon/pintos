@@ -3,6 +3,7 @@
 #include "threads/thread.h"
 #include "devices/timer.h"
 #include "threads/malloc.h"
+#include <string.h>
 
 static struct buffer_cache_entry buffer_cache[BUFFER_CACHE_ENTRY_SIZE];
 static struct lock buffer_cache_lock;
@@ -28,6 +29,53 @@ void buffer_cache_init() {
 }
 
 struct buffer_cache_entry *
+read_cache(block_sector_t sector) {
+  lock_acquire(&buffer_cache_lock);
+  struct buffer_cache_entry *cache = get_buffer_entry(sector);
+  if(cache == NULL) {
+    cache = caching(sector);
+  }
+  lock_release(&buffer_cache_lock);
+
+  return cache;
+}
+
+/* cache data의 offset 위치부터 buffer의 size만큼 write */
+void
+write_cache(struct buffer_cache_entry *cache, off_t cache_data_offset, void *buffer, size_t size) {
+  ASSERT(cache_data_offset + size <= BLOCK_SECTOR_SIZE);
+  lock_acquire(&buffer_cache_lock);
+  if(memcmp(cache->data + cache_data_offset, buffer, size) !=0) {
+    memcpy(cache->data + cache_data_offset, buffer, size);
+    cache->dirty = true;
+  }
+  lock_release(&buffer_cache_lock);
+}
+
+void
+set_cache(block_sector_t sector, uint8_t *data) {
+  lock_acquire(&buffer_cache_lock);
+  int idx = sector % BUFFER_CACHE_ENTRY_SIZE;
+  struct buffer_cache_entry *cache = &buffer_cache[idx];
+  write_back(cache);
+  cache->use = true;
+  cache->dirty = true;
+  cache->sector = sector;
+  memcpy(cache->data, data, BLOCK_SECTOR_SIZE);
+  lock_release(&buffer_cache_lock);
+}
+
+void
+remove_cache(block_sector_t sector) {
+  lock_acquire(&buffer_cache_lock);
+  struct buffer_cache_entry *cache = get_buffer_entry(sector);
+  if(cache != NULL) {
+    cache->use = false;
+  }
+  lock_release(&buffer_cache_lock);
+}
+
+struct buffer_cache_entry *
 get_buffer_entry(block_sector_t sector) {
   int idx = sector % BUFFER_CACHE_ENTRY_SIZE;
   lock_acquire(&buffer_cache_lock);
@@ -45,11 +93,7 @@ caching(block_sector_t sector) {
   int idx = sector % BUFFER_CACHE_ENTRY_SIZE;
   lock_acquire(&buffer_cache_lock);
   struct buffer_cache_entry *cache = &buffer_cache[idx];
-  // 이미 저장된 
-  if(cache->use && cache->dirty) {
-    write_back(cache);
-  }
-
+  write_back(cache);
   cache->use = true;
   cache->dirty = false;
   cache->sector = sector;
@@ -61,20 +105,20 @@ caching(block_sector_t sector) {
 
 void
 write_back(struct buffer_cache_entry *cache) {
-  block_write(fs_device, cache->sector, cache->data);
+  ASSERT(cache != NULL);
+  lock_acquire(&buffer_cache_lock);
+  if(cache->use && cache->dirty) {
+    block_write(fs_device, cache->sector, cache->data);
+    cache->use = false;
+    cache->dirty = false;
+  }
+  lock_release(&buffer_cache_lock);
 }
 
 void
 write_back_all() {
   for(int i=0 ; i<BUFFER_CACHE_ENTRY_SIZE ; i++) {
-      lock_acquire(&buffer_cache_lock);
-      struct buffer_cache_entry *cache = &buffer_cache[i];
-      if(cache->use && cache->dirty) {
-        write_back(cache);
-        cache->use = false;
-        cache->dirty = false;
-      }
-      lock_release(&buffer_cache_lock);
+      write_back(&buffer_cache[i]);
   }
 }
 
